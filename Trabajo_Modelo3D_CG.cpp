@@ -23,13 +23,22 @@
 const unsigned int SCR_WIDTH = 1024;
 const unsigned int SCR_HEIGHT = 768;
 
-glm::vec3 cameraPos = glm::vec3(0.0f, 3.0f, 10.0f);
-glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
+// Posición y orientación inicial panorámica frente al escenario
+const glm::vec3 INITIAL_CAMERA_POS = glm::vec3(0.0f, 11.0f, 22.0f);
+const float INITIAL_YAW = -90.0f; // Mirando directo al centro del mapa (-Z)
+const float INITIAL_PITCH = -24.0f; // Inclinación hacia abajo enfocando el valle
+
+glm::vec3 cameraPos = INITIAL_CAMERA_POS;
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+glm::vec3 cameraFront = glm::normalize(glm::vec3(
+    cos(glm::radians(INITIAL_YAW)) * cos(glm::radians(INITIAL_PITCH)),
+    sin(glm::radians(INITIAL_PITCH)),
+    sin(glm::radians(INITIAL_YAW)) * cos(glm::radians(INITIAL_PITCH))
+));
 
 bool firstMouse = true;
-float yaw = -90.0f; // Mirando hacia -Z inicialmente
-float pitch = -10.0f; // Ligeramente inclinado hacia el suelo del mapa
+float yaw = INITIAL_YAW;
+float pitch = INITIAL_PITCH;
 float lastX = SCR_WIDTH / 2.0f;
 float lastY = SCR_HEIGHT / 2.0f;
 
@@ -84,7 +93,20 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    float cameraSpeed = 6.0f * deltaTime;
+    // Tecla R: Restaurar cámara a la vista panorámica inicial
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS)
+    {
+        cameraPos = INITIAL_CAMERA_POS;
+        yaw = INITIAL_YAW;
+        pitch = INITIAL_PITCH;
+        cameraFront = glm::normalize(glm::vec3(
+            cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
+            sin(glm::radians(pitch)),
+            sin(glm::radians(yaw)) * cos(glm::radians(pitch))
+        ));
+    }
+
+    float cameraSpeed = 7.0f * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         cameraPos += cameraSpeed * cameraFront;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -198,7 +220,7 @@ int main()
 
             // Obtener color difuso del material asociado a esta cara
             int matId = shape.mesh.material_ids[f];
-            float r = 0.85f, g = 0.90f, b = 0.95f; // Color nieve por defecto si no hay material
+            float r = 0.85f, g = 0.90f, b = 0.95f;
             if (matId >= 0 && matId < static_cast<int>(materials.size())) {
                 r = materials[matId].diffuse[0];
                 g = materials[matId].diffuse[1];
@@ -227,10 +249,10 @@ int main()
         }
     }
 
-    // Centrar en X y Z, pero apoyar la base (minY) en Y = 0
+    // Centrar en X y Z, apoyando la base (minY) en Y = 0
     glm::vec3 mapCenter = glm::vec3((minX + maxX) / 2.0f, minY, (minZ + maxZ) / 2.0f);
     float maxDim = std::max({ maxX - minX, maxY - minY, maxZ - minZ });
-    float mapScale = (maxDim > 0.0001f) ? (25.0f / maxDim) : 1.0f; // Escenario amplio de 25 unidades
+    float mapScale = (maxDim > 0.0001f) ? (25.0f / maxDim) : 1.0f;
 
     // Configuración de VAO y VBO del Mapa
     GLuint mapVAO, mapVBO;
