@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -16,6 +17,11 @@
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NO_STB_IMAGE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#include <tiny_gltf.h>
 
 // ---------------------------------------------------------------------------------
 // VARIABLES GLOBALES DE CÁMARA (WASD + MOUSE)
@@ -43,6 +49,116 @@ float lastY = SCR_HEIGHT / 2.0f;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+
+// ---------------------------------------------------------------------------------
+// CARGADOR DE MODELO GLB / GLTF (POSICIÓN + COLOR + NORMAL)
+// ---------------------------------------------------------------------------------
+bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, glm::vec3& outCenter, float& outMaxDim)
+{
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err, warn;
+    loader.SetImageLoader([](tinygltf::Image*, const int, std::string*, std::string*, int, int, const unsigned char*, int, void*) { return true; }, nullptr);
+
+    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+    if (!warn.empty()) std::cout << "Advertencia GLB: " << warn << std::endl;
+    if (!err.empty())  std::cerr << "Error GLB: " << err << std::endl;
+    if (!ret) return false;
+
+    float minX = 1e10f, minY = 1e10f, minZ = 1e10f;
+    float maxX = -1e10f, maxY = -1e10f, maxZ = -1e10f;
+
+    for (const auto& mesh : model.meshes) {
+        for (const auto& primitive : mesh.primitives) {
+            if (primitive.mode != TINYGLTF_MODE_TRIANGLES && primitive.mode != -1) continue;
+
+            float r = 0.90f, g = 0.45f, b = 0.15f;
+            if (primitive.material >= 0 && primitive.material < static_cast<int>(model.materials.size())) {
+                const auto& factor = model.materials[primitive.material].pbrMetallicRoughness.baseColorFactor;
+                if (factor.size() >= 3) {
+                    r = static_cast<float>(factor[0]);
+                    g = static_cast<float>(factor[1]);
+                    b = static_cast<float>(factor[2]);
+                }
+            }
+
+            auto posIt = primitive.attributes.find("POSITION");
+            if (posIt == primitive.attributes.end()) continue;
+            const auto& posAccessor = model.accessors[posIt->second];
+            const auto& posView = model.bufferViews[posAccessor.bufferView];
+            const auto& posBuffer = model.buffers[posView.buffer];
+            const float* positions = reinterpret_cast<const float*>(&posBuffer.data[posView.byteOffset + posAccessor.byteOffset]);
+            size_t posStride = posAccessor.ByteStride(posView) ? (posAccessor.ByteStride(posView) / sizeof(float)) : 3;
+
+            const float* normals = nullptr;
+            size_t normStride = 3;
+            auto normIt = primitive.attributes.find("NORMAL");
+            if (normIt != primitive.attributes.end()) {
+                const auto& normAccessor = model.accessors[normIt->second];
+                const auto& normView = model.bufferViews[normAccessor.bufferView];
+                const auto& normBuffer = model.buffers[normView.buffer];
+                normals = reinterpret_cast<const float*>(&normBuffer.data[normView.byteOffset + normAccessor.byteOffset]);
+                normStride = normAccessor.ByteStride(normView) ? (normAccessor.ByteStride(normView) / sizeof(float)) : 3;
+            }
+
+            std::vector<uint32_t> indices;
+            if (primitive.indices >= 0) {
+                const auto& idxAccessor = model.accessors[primitive.indices];
+                const auto& idxView = model.bufferViews[idxAccessor.bufferView];
+                const auto& idxBuffer = model.buffers[idxView.buffer];
+                const unsigned char* dataPtr = &idxBuffer.data[idxView.byteOffset + idxAccessor.byteOffset];
+
+                for (size_t i = 0; i < idxAccessor.count; ++i) {
+                    if (idxAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+                        indices.push_back(reinterpret_cast<const uint16_t*>(dataPtr)[i]);
+                    else if (idxAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+                        indices.push_back(reinterpret_cast<const uint32_t*>(dataPtr)[i]);
+                    else if (idxAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+                        indices.push_back(dataPtr[i]);
+                }
+            }
+            else {
+                for (size_t i = 0; i < posAccessor.count; ++i) indices.push_back(static_cast<uint32_t>(i));
+            }
+
+            for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+                uint32_t idx[3] = { indices[i], indices[i + 1], indices[i + 2] };
+                glm::vec3 vPos[3];
+                for (int k = 0; k < 3; ++k) {
+                    vPos[k] = glm::vec3(
+                        positions[idx[k] * posStride + 0],
+                        positions[idx[k] * posStride + 1],
+                        positions[idx[k] * posStride + 2]
+                    );
+                }
+                glm::vec3 faceNormal = glm::normalize(glm::cross(vPos[1] - vPos[0], vPos[2] - vPos[0]));
+
+                for (int k = 0; k < 3; ++k) {
+                    float x = vPos[k].x, y = vPos[k].y, z = vPos[k].z;
+                    float nx = faceNormal.x, ny = faceNormal.y, nz = faceNormal.z;
+
+                    if (normals) {
+                        nx = normals[idx[k] * normStride + 0];
+                        ny = normals[idx[k] * normStride + 1];
+                        nz = normals[idx[k] * normStride + 2];
+                    }
+
+                    outVertices.push_back(x);  outVertices.push_back(y);  outVertices.push_back(z);
+                    outVertices.push_back(r);  outVertices.push_back(g);  outVertices.push_back(b);
+                    outVertices.push_back(nx); outVertices.push_back(ny); outVertices.push_back(nz);
+
+                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                }
+            }
+        }
+    }
+
+    outCenter = glm::vec3((minX + maxX) / 2.0f, (minY + maxY) / 2.0f, (minZ + maxZ) / 2.0f);
+    outMaxDim = std::max({ maxX - minX, maxY - minY, maxZ - minZ });
+    return !outVertices.empty();
+}
 
 // ---------------------------------------------------------------------------------
 // CALLBACKS Y CONTROLES
@@ -157,24 +273,20 @@ uniform vec3 lightColor;
 
 void main()
 {
-    // 1. Componente Ambiental
     float ambientStrength = 0.30;
     vec3 ambient = ambientStrength * lightColor;
 
-    // 2. Componente Difusa
     vec3 norm = normalize(Normal);
     vec3 lightDir = normalize(lightPos - FragPos);
     float diff = max(dot(norm, lightDir), 0.0);
     vec3 diffuse = diff * lightColor;
 
-    // 3. Componente Especular
     float specularStrength = 0.45;
     vec3 viewDir = normalize(viewPos - FragPos);
     vec3 reflectDir = reflect(-lightDir, norm);
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
     vec3 specular = specularStrength * spec * lightColor;
 
-    // Resultado final Phong aplicado al color del material
     vec3 result = (ambient + diffuse + specular) * ObjectColor;
     FragColor = vec4(result, 1.0);
 })";
@@ -187,7 +299,7 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Escenario 3D - Iluminacion Phong", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Escenario 3D - Paso 1: Carga de Nave GLB", nullptr, nullptr);
     if (!window) { glfwTerminate(); return -1; }
 
     glfwMakeContextCurrent(window);
@@ -199,7 +311,6 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    // Compilación de Shaders
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertexShader);
@@ -217,10 +328,9 @@ int main()
     glDeleteShader(fragmentShader);
 
     // ---------------------------------------------------------------------------------
-    // CARGA DEL MAPA NEVADO + EXTRACCIÓN/CÁLCULO DE NORMALES
+    // 1. CARGA DEL MAPA NEVADO (.OBJ + .MTL)
     // ---------------------------------------------------------------------------------
     std::vector<float> mapVertices;
-
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -229,9 +339,6 @@ int main()
     bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
         "models/MAPA NEVADO/model.obj",
         "models/MAPA NEVADO/");
-
-    if (!warn.empty()) std::cout << "Advertencia OBJ: " << warn << std::endl;
-    if (!err.empty())  std::cerr << "Error OBJ: " << err << std::endl;
     if (!ret) return -1;
 
     float minX = 1e10f, minY = 1e10f, minZ = 1e10f;
@@ -241,7 +348,6 @@ int main()
         size_t index_offset = 0;
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             size_t fv = size_t(shape.mesh.num_face_vertices[f]);
-
             int matId = shape.mesh.material_ids[f];
             float r = 0.85f, g = 0.90f, b = 0.95f;
             if (matId >= 0 && matId < static_cast<int>(materials.size())) {
@@ -250,7 +356,6 @@ int main()
                 b = materials[matId].diffuse[2];
             }
 
-            // Obtener posiciones del triángulo para calcular normal si el OBJ no la incluye
             glm::vec3 triPos[3];
             for (size_t v = 0; v < 3 && v < fv; v++) {
                 tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
@@ -275,7 +380,6 @@ int main()
                     nz = attrib.normals[3 * idx.normal_index + 2];
                 }
 
-                // Guardar Posición (3) + Color (3) + Normal (3) = 9 floats
                 mapVertices.push_back(x);  mapVertices.push_back(y);  mapVertices.push_back(z);
                 mapVertices.push_back(r);  mapVertices.push_back(g);  mapVertices.push_back(b);
                 mapVertices.push_back(nx); mapVertices.push_back(ny); mapVertices.push_back(nz);
@@ -289,33 +393,52 @@ int main()
     }
 
     glm::vec3 mapCenter = glm::vec3((minX + maxX) / 2.0f, minY, (minZ + maxZ) / 2.0f);
-    float maxDim = std::max({ maxX - minX, maxY - minY, maxZ - minZ });
-    float mapScale = (maxDim > 0.0001f) ? (25.0f / maxDim) : 1.0f;
+    float mapMaxDim = std::max({ maxX - minX, maxY - minY, maxZ - minZ });
+    float mapScale = (mapMaxDim > 0.0001f) ? (25.0f / mapMaxDim) : 1.0f;
 
-    // Configuración de VAO y VBO del Mapa (stride de 9 floats)
     GLuint mapVAO, mapVBO;
     glGenVertexArrays(1, &mapVAO);
     glGenBuffers(1, &mapVBO);
-
     glBindVertexArray(mapVAO);
     glBindBuffer(GL_ARRAY_BUFFER, mapVBO);
     glBufferData(GL_ARRAY_BUFFER, mapVertices.size() * sizeof(float), mapVertices.data(), GL_STATIC_DRAW);
-
-    // Atributo 0: Posición
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-
-    // Atributo 1: Color del material
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-
-    // Atributo 2: Vector Normal
     glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
-
     glBindVertexArray(0);
 
-    // Ubicaciones de Uniforms
+    // ---------------------------------------------------------------------------------
+    // 2. CARGA DE LA NAVE ESPACIAL (.GLB)
+    // ---------------------------------------------------------------------------------
+    std::vector<float> shipVertices;
+    glm::vec3 shipCenter;
+    float shipMaxDim = 1.0f;
+
+    if (!loadGLBModel("models/SPACESHIP/SPACESHIP.glb", shipVertices, shipCenter, shipMaxDim)) {
+        std::cerr << "No se pudo cargar models/SPACESHIP/SPACESHIP.glb" << std::endl;
+        return -1;
+    }
+    float shipScale = (shipMaxDim > 0.0001f) ? (2.5f / shipMaxDim) : 1.0f;
+    std::cout << "Nave GLB cargada con exito (" << shipVertices.size() / 9 << " vertices)." << std::endl;
+
+    GLuint shipVAO, shipVBO;
+    glGenVertexArrays(1, &shipVAO);
+    glGenBuffers(1, &shipVBO);
+    glBindVertexArray(shipVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, shipVBO);
+    glBufferData(GL_ARRAY_BUFFER, shipVertices.size() * sizeof(float), shipVertices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+
+    // Uniforms
     GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
     GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
     GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
@@ -324,7 +447,6 @@ int main()
     GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
     GLint lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
 
-    // Posición y color de la fuente de luz (Sol en lo alto a la derecha)
     glm::vec3 lightPos = glm::vec3(15.0f, 25.0f, 15.0f);
     glm::vec3 lightColor = glm::vec3(1.0f, 0.98f, 0.92f);
 
@@ -344,29 +466,40 @@ int main()
 
         glUseProgram(shaderProgram);
 
-        // Matriz de Modelo y Matriz Normal
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(mapScale));
-        model = glm::translate(model, -mapCenter);
-
-        glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
-
-        // Matrices de Vista y Proyección
         glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 200.0f);
 
-        // Enviar matrices y parámetros de iluminación Phong al Shader
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
-
         glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
         glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
         glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
 
+        // --- A. RENDERIZAR MAPA NEVADO (ESTÁTICO) ---
+        glm::mat4 mapModel = glm::mat4(1.0f);
+        mapModel = glm::scale(mapModel, glm::vec3(mapScale));
+        mapModel = glm::translate(mapModel, -mapCenter);
+        glm::mat3 mapNormalMatrix = glm::transpose(glm::inverse(glm::mat3(mapModel)));
+
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(mapModel));
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(mapNormalMatrix));
+
         glBindVertexArray(mapVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mapVertices.size() / 9));
+
+        // --- B. RENDERIZAR NAVE ESPACIAL (.GLB) EN POSICIÓN FIJA ---
+        glm::mat4 shipModel = glm::mat4(1.0f);
+        shipModel = glm::translate(shipModel, glm::vec3(0.0f, 7.0f, 0.0f));
+        shipModel = glm::scale(shipModel, glm::vec3(shipScale));
+        shipModel = glm::translate(shipModel, -shipCenter);
+
+        glm::mat3 shipNormalMatrix = glm::transpose(glm::inverse(glm::mat3(shipModel)));
+
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(shipModel));
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(shipNormalMatrix));
+
+        glBindVertexArray(shipVAO);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(shipVertices.size() / 9));
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -374,6 +507,8 @@ int main()
 
     glDeleteVertexArrays(1, &mapVAO);
     glDeleteBuffers(1, &mapVBO);
+    glDeleteVertexArrays(1, &shipVAO);
+    glDeleteBuffers(1, &shipVBO);
     glDeleteProgram(shaderProgram);
 
     glfwDestroyWindow(window);
