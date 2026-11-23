@@ -67,6 +67,7 @@ glm::vec3 evaluateBezier(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm:
     point += ttt * p3;
     return point;
 }
+
 // Derivada B'(t) para obtener la dirección tangente de vuelo de la nave
 glm::vec3 evaluateBezierTangent(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3)
 {
@@ -79,14 +80,28 @@ glm::vec3 evaluateBezierTangent(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p
 }
 
 // ---------------------------------------------------------------------------------
-// CARGADOR DE MODELO GLB / GLTF (POSICIÓN + COLOR + NORMAL)
+// CARGADOR DE MODELO GLB / GLTF (POSICIÓN + COLOR/TEXTURA + NORMAL)
 // ---------------------------------------------------------------------------------
 bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, glm::vec3& outCenter, float& outMaxDim)
 {
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
-    loader.SetImageLoader([](tinygltf::Image*, const int, std::string*, std::string*, int, int, const unsigned char*, int, void*) { return true; }, nullptr);
+
+    loader.SetImageLoader([](tinygltf::Image* image, const int, std::string*, std::string*,
+        int, int, const unsigned char* bytes, int size, void*) -> bool {
+            int w = 0, h = 0, comp = 0;
+            unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4);
+            if (!data) return false;
+            image->width = w;
+            image->height = h;
+            image->component = 4;
+            image->bits = 8;
+            image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+            image->image.assign(data, data + (w * h * 4));
+            stbi_image_free(data);
+            return true;
+        }, nullptr);
 
     bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
     if (!warn.empty()) std::cout << "Advertencia GLB: " << warn << std::endl;
@@ -100,13 +115,22 @@ bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, 
         for (const auto& primitive : mesh.primitives) {
             if (primitive.mode != TINYGLTF_MODE_TRIANGLES && primitive.mode != -1) continue;
 
-            float r = 0.90f, g = 0.45f, b = 0.15f;
+            float baseR = 0.90f, baseG = 0.45f, baseB = 0.15f;
+            const tinygltf::Image* texImage = nullptr;
+
             if (primitive.material >= 0 && primitive.material < static_cast<int>(model.materials.size())) {
-                const auto& factor = model.materials[primitive.material].pbrMetallicRoughness.baseColorFactor;
-                if (factor.size() >= 3) {
-                    r = static_cast<float>(factor[0]);
-                    g = static_cast<float>(factor[1]);
-                    b = static_cast<float>(factor[2]);
+                const auto& pbr = model.materials[primitive.material].pbrMetallicRoughness;
+                if (pbr.baseColorFactor.size() >= 3) {
+                    baseR = static_cast<float>(pbr.baseColorFactor[0]);
+                    baseG = static_cast<float>(pbr.baseColorFactor[1]);
+                    baseB = static_cast<float>(pbr.baseColorFactor[2]);
+                }
+                int texIdx = pbr.baseColorTexture.index;
+                if (texIdx >= 0 && texIdx < static_cast<int>(model.textures.size())) {
+                    int imgIdx = model.textures[texIdx].source;
+                    if (imgIdx >= 0 && imgIdx < static_cast<int>(model.images.size()) && !model.images[imgIdx].image.empty()) {
+                        texImage = &model.images[imgIdx];
+                    }
                 }
             }
 
@@ -127,6 +151,17 @@ bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, 
                 const auto& normBuffer = model.buffers[normView.buffer];
                 normals = reinterpret_cast<const float*>(&normBuffer.data[normView.byteOffset + normAccessor.byteOffset]);
                 normStride = normAccessor.ByteStride(normView) ? (normAccessor.ByteStride(normView) / sizeof(float)) : 3;
+            }
+
+            const float* uvs = nullptr;
+            size_t uvStride = 2;
+            auto uvIt = primitive.attributes.find("TEXCOORD_0");
+            if (uvIt != primitive.attributes.end()) {
+                const auto& uvAccessor = model.accessors[uvIt->second];
+                const auto& uvView = model.bufferViews[uvAccessor.bufferView];
+                const auto& uvBuffer = model.buffers[uvView.buffer];
+                uvs = reinterpret_cast<const float*>(&uvBuffer.data[uvView.byteOffset + uvAccessor.byteOffset]);
+                uvStride = uvAccessor.ByteStride(uvView) ? (uvAccessor.ByteStride(uvView) / sizeof(float)) : 2;
             }
 
             std::vector<uint32_t> indices;
@@ -169,6 +204,20 @@ bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, 
                         nx = normals[idx[k] * normStride + 0];
                         ny = normals[idx[k] * normStride + 1];
                         nz = normals[idx[k] * normStride + 2];
+                    }
+
+                    float r = baseR, g = baseG, b = baseB;
+                    if (texImage && uvs) {
+                        float u = uvs[idx[k] * uvStride + 0];
+                        float v = uvs[idx[k] * uvStride + 1];
+                        u = u - std::floor(u);
+                        v = v - std::floor(v);
+                        int px = std::clamp(static_cast<int>(u * texImage->width), 0, texImage->width - 1);
+                        int py = std::clamp(static_cast<int>(v * texImage->height), 0, texImage->height - 1);
+                        size_t pixelOffset = (static_cast<size_t>(py) * texImage->width + px) * 4;
+                        r = (texImage->image[pixelOffset + 0] / 255.0f) * baseR;
+                        g = (texImage->image[pixelOffset + 1] / 255.0f) * baseG;
+                        b = (texImage->image[pixelOffset + 2] / 255.0f) * baseB;
                     }
 
                     outVertices.push_back(x);  outVertices.push_back(y);  outVertices.push_back(z);
@@ -298,6 +347,8 @@ in vec3 ObjectColor;
 uniform vec3 lightPos;
 uniform vec3 viewPos;
 uniform vec3 lightColor;
+uniform float specularStrength;
+uniform float shininess;
 
 void main()
 {
@@ -309,10 +360,9 @@ void main()
     float diff = max(dot(norm, lightDir), 0.0);
     vec3 diffuse = diff * lightColor;
 
-    float specularStrength = 0.45;
     vec3 viewDir = normalize(viewPos - FragPos);
     vec3 reflectDir = reflect(-lightDir, norm);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
     vec3 specular = specularStrength * spec * lightColor;
 
     vec3 result = (ambient + diffuse + specular) * ObjectColor;
@@ -471,6 +521,8 @@ int main()
     GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
     GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
     GLint normalMatrixLoc = glGetUniformLocation(shaderProgram, "normalMatrix");
+    GLint specStrengthLoc = glGetUniformLocation(shaderProgram, "specularStrength");
+    GLint shininessLoc = glGetUniformLocation(shaderProgram, "shininess");
     GLint lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
     GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
     GLint lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
@@ -478,8 +530,7 @@ int main()
     glm::vec3 lightPos = glm::vec3(15.0f, 25.0f, 15.0f);
     glm::vec3 lightColor = glm::vec3(1.0f, 0.98f, 0.92f);
 
-	//Puntos de la Curva de Bezier cúbica para la trayectoria de la nave
-    
+    // Puntos de la Curva de Bezier cúbica para la trayectoria de la nave
     glm::vec3 P0 = glm::vec3(-10.0f, 10.0f, 7.0f);
     glm::vec3 P1 = glm::vec3(-6.0f, 16.5f, -9.0f);
     glm::vec3 P2 = glm::vec3(8.0f, 14.5f, -8.0f);
@@ -518,6 +569,8 @@ int main()
 
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(mapModel));
         glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(mapNormalMatrix));
+        glUniform1f(specStrengthLoc, 0.25f);
+        glUniform1f(shininessLoc, 16.0f);
 
         glBindVertexArray(mapVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mapVertices.size() / 9));
@@ -546,13 +599,13 @@ int main()
 
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(shipModel));
         glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(shipNormalMatrix));
+        glUniform1f(specStrengthLoc, 0.95f);
+        glUniform1f(shininessLoc, 64.0f);
 
         glBindVertexArray(shipVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(shipVertices.size() / 9));
 
-
-		// Lineas que refrescan la ventana en cada fotograma y procesan los eventos de entrada (teclado, ratón, etc.)
-
+        // Líneas que refrescan la ventana en cada fotograma y procesan los eventos de entrada (teclado, ratón, etc.)
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
