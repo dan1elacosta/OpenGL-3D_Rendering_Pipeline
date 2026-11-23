@@ -23,6 +23,7 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
+#include "ShaderLighting.h"
 // ---------------------------------------------------------------------------------
 // VARIABLES GLOBALES DE CÁMARA (WASD + MOUSE)
 // ---------------------------------------------------------------------------------
@@ -311,64 +312,6 @@ void processInput(GLFWwindow* window)
         cameraPos -= cameraSpeed * cameraUp;
 }
 
-// ---------------------------------------------------------------------------------
-// SHADERS CON ILUMINACIÓN PHONG Y MATRIZ NORMAL
-// ---------------------------------------------------------------------------------
-const char* vertexShaderSource = R"(#version 330 core
-layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aColor;
-layout (location = 2) in vec3 aNormal;
-
-out vec3 FragPos;
-out vec3 Normal;
-out vec3 ObjectColor;
-
-uniform mat4 model;
-uniform mat4 view;
-uniform mat4 projection;
-uniform mat3 normalMatrix;
-
-void main()
-{
-    FragPos = vec3(model * vec4(aPos, 1.0));
-    Normal = normalMatrix * aNormal;
-    ObjectColor = aColor;
-
-    gl_Position = projection * view * vec4(FragPos, 1.0);
-})";
-
-const char* fragmentShaderSource = R"(#version 330 core
-out vec4 FragColor;
-
-in vec3 FragPos;
-in vec3 Normal;
-in vec3 ObjectColor;
-
-uniform vec3 lightPos;
-uniform vec3 viewPos;
-uniform vec3 lightColor;
-uniform float specularStrength;
-uniform float shininess;
-
-void main()
-{
-    float ambientStrength = 0.30;
-    vec3 ambient = ambientStrength * lightColor;
-
-    vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
-    float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = diff * lightColor;
-
-    vec3 viewDir = normalize(viewPos - FragPos);
-    vec3 reflectDir = reflect(-lightDir, norm);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
-    vec3 specular = specularStrength * spec * lightColor;
-
-    vec3 result = (ambient + diffuse + specular) * ObjectColor;
-    FragColor = vec4(result, 1.0);
-})";
-
 int main()
 {
     if (!glfwInit()) return -1;
@@ -389,21 +332,7 @@ int main()
 
     glEnable(GL_DEPTH_TEST);
 
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
+    GLuint shaderProgram = createPhongShaderProgram();
 
     // ---------------------------------------------------------------------------------
     // 1. CARGA DEL MAPA NEVADO (.OBJ + .MTL)
@@ -521,14 +450,7 @@ int main()
     GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
     GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
     GLint normalMatrixLoc = glGetUniformLocation(shaderProgram, "normalMatrix");
-    GLint specStrengthLoc = glGetUniformLocation(shaderProgram, "specularStrength");
-    GLint shininessLoc = glGetUniformLocation(shaderProgram, "shininess");
-    GLint lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
-    GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
-    GLint lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
 
-    glm::vec3 lightPos = glm::vec3(15.0f, 25.0f, 15.0f);
-    glm::vec3 lightColor = glm::vec3(1.0f, 0.98f, 0.92f);
 
     // Puntos de la Curva de Bezier cúbica para la trayectoria de la nave
     glm::vec3 P0 = glm::vec3(-10.0f, 10.0f, 7.0f);
@@ -552,14 +474,13 @@ int main()
 
         glUseProgram(shaderProgram);
 
+        // Matrices de vista y proyección + iluminación general de la escena
         glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 200.0f);
 
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-        glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
-        glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
-        glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
+        setupSceneLighting(shaderProgram, cameraPos);
 
         // --- A. RENDERIZAR MAPA NEVADO (ESTÁTICO) ---
         glm::mat4 mapModel = glm::mat4(1.0f);
@@ -569,8 +490,7 @@ int main()
 
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(mapModel));
         glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(mapNormalMatrix));
-        glUniform1f(specStrengthLoc, 0.25f);
-        glUniform1f(shininessLoc, 16.0f);
+        setMaterialPhong(shaderProgram, 0.25f, 16.0f); // Material mate (terreno)
 
         glBindVertexArray(mapVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mapVertices.size() / 9));
@@ -599,8 +519,7 @@ int main()
 
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(shipModel));
         glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(shipNormalMatrix));
-        glUniform1f(specStrengthLoc, 0.95f);
-        glUniform1f(shininessLoc, 64.0f);
+        setMaterialPhong(shaderProgram, 0.95f, 64.0f); // Material metálico (nave)
 
         glBindVertexArray(shipVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(shipVertices.size() / 9));
