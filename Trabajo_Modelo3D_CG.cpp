@@ -468,6 +468,13 @@ int main()
     glm::vec3 lightPos = glm::vec3(15.0f, 25.0f, 15.0f);
     glm::vec3 lightColor = glm::vec3(1.0f, 0.98f, 0.92f);
 
+	//Puntos de la Curva de Bezier cúbica para la trayectoria de la nave
+    
+    glm::vec3 P0 = glm::vec3(-10.0f, 6.0f, 7.0f);
+    glm::vec3 P1 = glm::vec3(-6.0f, 11.0f, -9.0f);
+    glm::vec3 P2 = glm::vec3(8.0f, 10.0f, -8.0f);
+    glm::vec3 P3 = glm::vec3(10.0f, 5.5f, 7.0f);
+
     // ---------------------------------------------------------------------------------
     // BUCLE PRINCIPAL DE RENDERIZADO
     // ---------------------------------------------------------------------------------
@@ -505,9 +512,11 @@ int main()
         glBindVertexArray(mapVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mapVertices.size() / 9));
 
-        // --- B. RENDERIZAR NAVE ESPACIAL (.GLB) EN POSICIÓN FIJA ---
+        // --- B. RENDERIZAR NAVE ESPACIAL (.GLB) SIGUIENDO CURVA DE BÉZIER ---
+        float t = 0.5f * (1.0f - cos(currentFrame * 0.45f));
+        glm::vec3 bezierPos = evaluateBezier(t, P0, P1, P2, P3);
         glm::mat4 shipModel = glm::mat4(1.0f);
-        shipModel = glm::translate(shipModel, glm::vec3(0.0f, 7.0f, 0.0f));
+        shipModel = glm::translate(shipModel, bezierPos);
         shipModel = glm::scale(shipModel, glm::vec3(shipScale));
         shipModel = glm::translate(shipModel, -shipCenter);
 
