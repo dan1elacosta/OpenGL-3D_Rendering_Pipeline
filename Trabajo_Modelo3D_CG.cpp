@@ -67,6 +67,16 @@ glm::vec3 evaluateBezier(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm:
     point += ttt * p3;
     return point;
 }
+// Derivada B'(t) para obtener la dirección tangente de vuelo de la nave
+glm::vec3 evaluateBezierTangent(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3)
+{
+    float u = 1.0f - t;
+    glm::vec3 tangent = 3.0f * u * u * (p1 - p0)
+        + 6.0f * u * t * (p2 - p1)
+        + 3.0f * t * t * (p3 - p2);
+    if (glm::length(tangent) < 0.0001f) return glm::vec3(0.0f, 0.0f, -1.0f);
+    return glm::normalize(tangent);
+}
 
 // ---------------------------------------------------------------------------------
 // CARGADOR DE MODELO GLB / GLTF (POSICIÓN + COLOR + NORMAL)
@@ -512,11 +522,23 @@ int main()
         glBindVertexArray(mapVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mapVertices.size() / 9));
 
-        // --- B. RENDERIZAR NAVE ESPACIAL (.GLB) SIGUIENDO CURVA DE BÉZIER ---
+        // --- B. RENDERIZAR NAVE ESPACIAL (.GLB) CON CURVA DE BÉZIER + ORIENTACIÓN DINÁMICA ---
         float t = 0.5f * (1.0f - cos(currentFrame * 0.45f));
+        float dirSign = (sin(currentFrame * 0.45f) >= 0.0f) ? 1.0f : -1.0f;
+
         glm::vec3 bezierPos = evaluateBezier(t, P0, P1, P2, P3);
+        glm::vec3 tangent = evaluateBezierTangent(t, P0, P1, P2, P3) * dirSign;
+
+        // Ángulos de dirección (Yaw/Pitch) y alabeo (Roll)
+        float headingYaw = atan2(tangent.x, tangent.z);
+        float pitchAngle = -asin(glm::clamp(tangent.y, -0.99f, 0.99f));
+        float rollAngle = sin(currentFrame * 2.0f) * glm::radians(30.0f);
+
         glm::mat4 shipModel = glm::mat4(1.0f);
         shipModel = glm::translate(shipModel, bezierPos);
+        shipModel = glm::rotate(shipModel, headingYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        shipModel = glm::rotate(shipModel, pitchAngle, glm::vec3(1.0f, 0.0f, 0.0f));
+        shipModel = glm::rotate(shipModel, rollAngle, glm::vec3(0.0f, 0.0f, 1.0f));
         shipModel = glm::scale(shipModel, glm::vec3(shipScale));
         shipModel = glm::translate(shipModel, -shipCenter);
 
@@ -527,6 +549,9 @@ int main()
 
         glBindVertexArray(shipVAO);
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(shipVertices.size() / 9));
+
+
+		// Lineas que refrescan la ventana en cada fotograma y procesan los eventos de entrada (teclado, ratón, etc.)
 
         glfwSwapBuffers(window);
         glfwPollEvents();
