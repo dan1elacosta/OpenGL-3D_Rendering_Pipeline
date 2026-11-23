@@ -470,10 +470,10 @@ int main()
 
 	//Puntos de la Curva de Bezier cúbica para la trayectoria de la nave
     
-    glm::vec3 P0 = glm::vec3(-10.0f, 6.0f, 7.0f);
-    glm::vec3 P1 = glm::vec3(-6.0f, 11.0f, -9.0f);
-    glm::vec3 P2 = glm::vec3(8.0f, 10.0f, -8.0f);
-    glm::vec3 P3 = glm::vec3(10.0f, 5.5f, 7.0f);
+    glm::vec3 P0 = glm::vec3(-10.0f, 10.0f, 7.0f);
+    glm::vec3 P1 = glm::vec3(-6.0f, 16.5f, -9.0f);
+    glm::vec3 P2 = glm::vec3(8.0f, 14.5f, -8.0f);
+    glm::vec3 P3 = glm::vec3(10.0f, 9.0f, 7.0f);
 
     // ---------------------------------------------------------------------------------
     // BUCLE PRINCIPAL DE RENDERIZADO
