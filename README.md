@@ -4,6 +4,22 @@ Proyecto de Computación Gráfica desarrollado en **C++** y **OpenGL 3.3 Core Pr
 
 ---
 
+## Paso a Paso del Desarrollo
+
+El proyecto se construyó de manera incremental siguiendo estas etapas técnicas:
+
+1. **Configuración del entorno y dependencias base**: Creación del proyecto en C++ con CMake, inicialización del contexto gráfico de **OpenGL 3.3 Core** mediante **GLFW** y carga de extensiones con **GLAD**, integrando **GLM** para operaciones algebraicas vectoriales y matriciales.
+2. **Carga del escenario estático (`.obj` + `.mtl`)**: Implementación del parser con `tiny_obj_loader` para leer la malla poligonal, colores difusos y normales del entorno nevado, almacenando los atributos intercalados en un *Vertex Buffer Object* (`mapVBO`) y configurando su *Vertex Array Object* (`mapVAO`).
+3. **Normalización de escala y centrado del mapa**: Cálculo de la caja envolvente (*Bounding Box*) mínima y máxima del terreno para centrar su base en el origen `(0, 0, 0)` y escalarlo uniformemente a una dimensión máxima de `25.0` unidades mediante transformaciones afines en su matriz `model`.
+4. **Cámara libre en primera persona y control de entrada**: Desarrollo de la matriz de vista (`glm::lookAt`) controlada por teclado (`W, A, S, D`, `Espacio`, `Shift`, `R`) y movimiento del ratón mediante ángulos de Euler (*Yaw* y *Pitch*) sincronizados con `deltaTime`.
+5. **Iluminación Phong y matriz normal**: Implementación del modelo de iluminación de Phong (componentes ambiental, difusa y especular) en GLSL junto con el cálculo de la matriz normal $(M_{3\times 3}^{-1})^T$ para preservar la dirección correcta de las normales tras escalar y rotar los modelos.
+6. **Integración del modelo dinámico (`.glb`)**: Desarrollo de un cargador binario glTF 2.0 (`loadGLBModel`) usando `tinygltf` y `stb_image` para extraer geometría, coordenadas UV y decodificar la textura incrustada directamente desde memoria (`stbi_load_from_memory`).
+7. **Trayectoria mediante Curva de Bézier Cúbica ($B(t)$)**: Definición de cuatro puntos de control elevados sobre las cumbres más altas del mapa y programación de `evaluateBezier` para animar la traslación suave de la nave en bucle sobre el valle.
+8. **Orientación tangencial ($B'(t)$) y alabeo dinámico**: Cálculo de la primera derivada de la curva (`evaluateBezierTangent`) para alinear la proa (*Yaw*) y el cabeceo (*Pitch*) de la nave con el vector director del vuelo, sumando una rotación sinusoidal (*Roll*) sobre su eje longitudinal.
+9. **Diferenciación de materiales y modularización**: Ajuste de propiedades especulares (`specularStrength` y `shininess`) para distinguir el acabado mate de la nieve frente al brillo metálico de la nave, y extracción de los shaders e iluminación a la cabecera `ShaderLighting.h` para mantener limpio el bucle principal.
+
+---
+
 ## Arquitectura del Proyecto
 
 Para mantener el código limpio, modular y fácil de sustentar, la lógica gráfica se dividió en dos archivos principales:
@@ -69,8 +85,8 @@ Ambos modelos fueron obtenidos de la biblioteca abierta **[Poly Pizza](https://p
 
 | Elemento en Escena | Formato | Archivo | Enlace de Descarga | Justificación Técnica del Formato |
 | :--- | :---: | :--- | :--- | :--- |
-| **Paisaje Nevado (Estático)** | `.obj` + `.mtl` | `models/MAPA NEVADO/model.obj` | `[PEGAR LINK DE POLY PIZZA AQUÍ]` | Ideal para geometría estática compuesta por múltiples mallas y materiales difusos planos definidos en su archivo `.mtl` mediante `tiny_obj_loader`. |
-| **Nave Espacial (Animada)** | `.glb` | `models/SPACESHIP/SPACESHIP.glb` | `[PEGAR LINK DE POLY PIZZA AQUÍ]` | Formato binario autocontenido (glTF 2.0) que empaqueta malla, normales, coordenadas UV y textura en un solo archivo compacto, facilitando su carga y transformación dinámica en tiempo real. |
+| **Paisaje Nevado (Estático)** | `.obj` + `.mtl` | `models/MAPA NEVADO/model.obj` | [Ver en Poly Pizza](https://poly.pizza/m/4lCs5UfqQfq) | Ideal para geometría estática compuesta por múltiples mallas y materiales difusos planos definidos en su archivo `.mtl` mediante `tiny_obj_loader`. |
+| **Nave Espacial (Animada)** | `.glb` | `models/SPACESHIP/SPACESHIP.glb` | [Ver en Poly Pizza](https://poly.pizza/m/uCeLfsdmNP) | Formato binario autocontenido (glTF 2.0) que empaqueta malla, normales, coordenadas UV y textura en un solo archivo compacto, facilitando su carga y transformación dinámica en tiempo real. |
 
 ---
 
