@@ -51,6 +51,24 @@ float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
 // ---------------------------------------------------------------------------------
+// FUNCIÓN MATEMÁTICA DE CURVA DE BÉZIER CÚBICA
+// ---------------------------------------------------------------------------------
+glm::vec3 evaluateBezier(float t, glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3)
+{
+    float u = 1.0f - t;
+    float tt = t * t;
+    float uu = u * u;
+    float uuu = uu * u;
+    float ttt = tt * t;
+
+    glm::vec3 point = uuu * p0;
+    point += 3.0f * uu * t * p1;
+    point += 3.0f * u * tt * p2;
+    point += ttt * p3;
+    return point;
+}
+
+// ---------------------------------------------------------------------------------
 // CARGADOR DE MODELO GLB / GLTF (POSICIÓN + COLOR + NORMAL)
 // ---------------------------------------------------------------------------------
 bool loadGLBModel(const std::string& filename, std::vector<float>& outVertices, glm::vec3& outCenter, float& outMaxDim)
