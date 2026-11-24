@@ -1,5 +1,6 @@
 # Escenario 3D Interactivo con Iluminación Phong y Trayectoria de Bézier (OpenGL 3.3)
 Daniel Augusto Acosta Quintero - Codigo: 6000977
+
 Proyecto de Computación Gráfica desarrollado en **C++** y **OpenGL 3.3 Core Profile**. La escena representa un entorno montañoso nevado estático sobrevolado por una nave espacial animada mediante una **Curva de Bézier Cúbica**, incorporando orientación tangencial dinámica, alabeo, cámara libre en primera persona e iluminación Phong diferenciada por material.
 
 ---
